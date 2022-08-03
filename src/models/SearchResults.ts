@@ -13,6 +13,7 @@ export interface SearchTrack {
     states: string[]
     cities: string[]
     sites: SearchTrackSite[]
+    hierarchicalNames: SearchLocationNames[]
 
     startTime: string
     endTime: string
@@ -44,4 +45,20 @@ export interface GeoBounds {
 export interface GeoPoint {
     latitude: number
     longitude: number
+}
+
+export interface SearchLocationNames {
+    countryName?: string,
+    countryCode?: string,
+    stateName?: string,
+    cityName?: string,
+    sites: SearchLocationNamesSite[]
+}
+
+export interface SearchLocationNamesSite{
+    id: string,
+    name: string,
+    lat: number,
+    lon: number,
+    children: SearchLocationNamesSite[]
 }

@@ -8,12 +8,23 @@
       </Dialog>
     </div>
 
+    <Dialog header="Enter a lat/lon coordinate" v-model:visible="latLonDialogActive" :closeOnEscape="true" position="top">
+      <span class="p-input-icon-left">
+        <i class="pi pi-map-marker" />
+        <InputText type="text" v-model="latLonEntryText" placeholder="lat/lon or lon|lat" autofocus v-on:keypress="latLonEntryKeyPress" />
+        <Button label="Go" icon="pi pi-arrow-right" @click="processGotoLatLon()" />
+      </span>
+      <template #footer>
+        <Button label="Close" class="p-button-secondary" @click="setactiveTool(Tool.None)" />
+      </template>
+    </Dialog>
+
     <Splitter class="page-container" layout="horizontal" stateKey="rangic.tracks.map" stateStorage="local"
         @resizeend="map?.invalidateSize()">
 
       <SplitterPanel>
         <Info :tracks="tracks" :gpxList="[gpx]" :selection="currentSelection" 
-        @selectionChanged="selectionChanged" @sizeToBounds="sizeToBounds" />
+          @selectionChanged="selectionChanged" @sizeToBounds="sizeToBounds" />
       </SplitterPanel>
 
       <SplitterPanel class="fill-space-row">
@@ -33,7 +44,9 @@ import "leaflet/dist/leaflet.css"
 import L, { Control } from 'leaflet'
 import 'leaflet-easybutton'
 import { LeafletMouseEvent } from 'leaflet'
+import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
+import InputText from 'primevue/inputtext'
 import ProgressBar from 'primevue/progressbar'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
@@ -54,15 +67,18 @@ import { GpxFeatureGroup } from "@/utils/GpxFeatureGroup"
 import { MapSelection, noMapSelection } from '@/models/MapSelection'
 import { RangicMapEvent } from '@/models/RangicMapEvent'
 
-enum Tool {
+export enum Tool {
   None,
   NameLookup,
   Measure,
+  GotoLocation,
 }
 
 @Options({
   components: {
+    Button,
     Dialog,
+    InputText,
     ProgressBar,
     Splitter,
     SplitterPanel,
@@ -75,6 +91,8 @@ export default class Map extends Vue {
   map?: L.Map
   isLoading = false
   activeTool = Tool.None
+  latLonDialogActive = false
+  latLonEntryText = ''
   gpxId = ''
   gpxName = ''
   gpx: Gpx = emptyGpx
@@ -84,6 +102,7 @@ export default class Map extends Vue {
   measureTool?: Measure
   locationButton?: Control.EasyButton
   measureButton?: Control.EasyButton
+  gotoLocationButton?: Control.EasyButton
   currentSelection: MapSelection = noMapSelection
   defaultEasyButtonClassNames = 'easy-button-button leaflet-bar-part leaflet-interactive unnamed-state-active'
   
@@ -99,6 +118,42 @@ export default class Map extends Vue {
   // Invoked by the vue-leaflet wrapper when the underlying Leaflet map is ready
   onMapReady(): void {
     this.populateMap()
+  }
+
+  latLonEntryKeyPress(e: KeyboardEvent): void {
+    // Accept:
+    //    number,number (assume lat/lon)
+    //    number|number (assume lon/lat) [pasted from the CVS files the service indexes]
+    if (e.key === 'Enter') {
+      this.processGotoLatLon()
+    }
+  }
+
+  processGotoLatLon(): void {
+    try {
+      let converted = false
+      let lat = 0
+      let lon = 0 
+      let tokens = this.latLonEntryText.split(',').map( (s) => s.trim() )
+      if (tokens.length === 2) {
+        lat = +tokens[0]
+        lon = +tokens[1]
+        converted = true
+      } else {
+        tokens = this.latLonEntryText.split('|').map( (s) => s.trim() )
+        if (tokens.length === 2) {
+          lat = +tokens[1]
+          lon = +tokens[0]
+          converted = true
+        }
+      }
+      if (converted) {
+        this.map?.setView(L.latLng(lat, lon, 18))
+        this.setActiveTool(Tool.None)
+      }
+    } catch(err) {
+      this.$toast.add({severity: 'error', summary: `Failed converting lat/lon`, detail: err})
+    }
   }
 
   @Watch('activeTool')
@@ -227,22 +282,25 @@ export default class Map extends Vue {
     }
   }
 
-  setActiveTool(newTool: Tool) {
+  setActiveTool(newTool: Tool): void {
     if (this.activeTool === newTool) {
       newTool = Tool.None
     }
 
     switch(this.activeTool) {
       case Tool.NameLookup: {
-        const btnEl = (this.locationButton as any).button as HTMLElement
-        btnEl.className = this.defaultEasyButtonClassNames
+        this.setMapButtonState(false, this.locationButton)
         break
       }
       case Tool.Measure: {
         this.clearMeasureTool()
-        const btnEl = (this.measureButton as any).button as HTMLElement
-        btnEl.className = this.defaultEasyButtonClassNames
+        this.setMapButtonState(false, this.measureButton)
         this.measureTool?.stop()
+        break
+      }
+      case Tool.GotoLocation: {
+        this.setMapButtonState(false, this.gotoLocationButton)
+        this.latLonDialogActive = false
         break
       }
     }
@@ -250,19 +308,31 @@ export default class Map extends Vue {
     this.activeTool = newTool
     switch(newTool) {
       case Tool.NameLookup: {
-        const btnEl = (this.locationButton as any).button as HTMLElement
-        btnEl.className = this.defaultEasyButtonClassNames + ' active-button'
+        this.setMapButtonState(true, this.locationButton)
         break
       }
       case Tool.Measure: {
         this.clearMeasureTool()
-        const btnEl = (this.measureButton as any).button as HTMLElement
-        btnEl.className = this.defaultEasyButtonClassNames + ' active-button'
+        this.setMapButtonState(true, this.measureButton)
         if (this.map) {
           this.measureTool = new Measure(this.map)
         }
         break
       }
+      case Tool.GotoLocation: {
+        this.setMapButtonState(true, this.gotoLocationButton)
+        this.latLonDialogActive = true
+        break
+      }
+    }
+  }
+
+  setMapButtonState(isActive: boolean, button?: Control.EasyButton): void {
+    const btnEl = (button as any).button as HTMLElement
+    if (isActive) {
+      btnEl.className = this.defaultEasyButtonClassNames + ' active-button'
+    } else {
+      btnEl.className = this.defaultEasyButtonClassNames
     }
   }
 
@@ -290,17 +360,24 @@ export default class Map extends Vue {
     // The tool buttons in the top left
     this.locationButton = L.easyButton(
       'map-button-size fa-solid fa-magnifying-glass-location',
-      (btn) => {
+      () => {
         this.setActiveTool(Tool.NameLookup)
       },
       'Lookup location name')
       .addTo(this.map)
     this.measureButton = L.easyButton(
       'map-button-size fa-solid fa-ruler',
-      (btn) => {
+      () => {
         this.setActiveTool(Tool.Measure)
       },
       'Measure')
+      .addTo(this.map)
+    this.gotoLocationButton = L.easyButton(
+      'map-button-size fa-solid fa-map-location-dot',
+      () => {
+        this.setActiveTool(Tool.GotoLocation)
+      },
+      'Goto Location')
       .addTo(this.map)
     L.easyButton(
       'map-button-size fa-solid fa-file-import',
@@ -336,9 +413,6 @@ export default class Map extends Vue {
 </script>
 
 <style global>
-/* .leaflet-container {
-  font-size: 1em;
-} */
 
 .leaflet-popup, .leaflet-control-layers-list {
   font-size: 1.3em;

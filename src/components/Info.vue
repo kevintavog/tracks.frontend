@@ -20,29 +20,43 @@
       </div>
 
       <div class="track-details">
-        <div :class="itemClass(item, gpxIndex, itemIndex)" 
-            v-for="(item, itemIndex) in trackDetails[gpxIndex]" :key="`${gpxIndex}:${itemIndex}`" 
-            @click="select(item)"
-            ref="refTrackDetails">
-          <span>
-            <i :class="itemIcon(item)"></i>
-            {{itemTime(item)}}
-          </span>
-          <Button class="zoom-button p-button-rounded p-button-text p-button-plain p-button-lg" 
-            icon="fa-solid fa-magnifying-glass-location"
-            @click="zoomToItem(item)" ></Button>
-          <div class="item-detail-inset" v-if="isSegment(item)">
-            {{Displayable.distance(item.segment.kilometers)}},
-            {{Displayable.speed(item.segment.seconds, item.segment.kilometers)}},
-            {{Displayable.durationSeconds(item.segment.seconds)}}
-            <div v-if="item.segment.rangic && item.segment.rangic.transportationTypes" >
-              {{ item.segment.rangic.transportationTypes[0].mode }}
+        <TabView>
+          <TabPanel header="Details">
+            <div :class="itemClass(item, gpxIndex, itemIndex)" 
+                v-for="(item, itemIndex) in trackDetails[gpxIndex]" :key="`${gpxIndex}:${itemIndex}`" 
+                @click="select(item)"
+                ref="refTrackDetails">
+              <span>
+                <i :class="itemIcon(item)"></i>
+                {{itemTime(item)}}
+              </span>
+              <Button class="zoom-button p-button-rounded p-button-text p-button-plain p-button-lg" 
+                icon="fa-solid fa-magnifying-glass-location"
+                @click="zoomToItem(item)" ></Button>
+              <div class="item-detail-inset" v-if="isSegment(item)">
+                {{Displayable.distance(item.segment.kilometers)}},
+                {{Displayable.speed(item.segment.seconds, item.segment.kilometers)}},
+                {{Displayable.durationSeconds(item.segment.seconds)}}
+                <div v-if="item.segment.rangic && item.segment.rangic.transportationTypes" >
+                  {{ item.segment.rangic.transportationTypes[0].mode }}
+                </div>
+              </div>
+              <div class="item-detail-inset" v-if="isWaypoint(item)">
+                {{Displayable.durationSeconds(item.waypoint.seconds)}}
+              </div>
             </div>
-          </div>
-          <div class="item-detail-inset" v-if="isWaypoint(item)">
-            {{Displayable.durationSeconds(item.waypoint.seconds)}}
-          </div>
-        </div>
+          </TabPanel>
+          <TabPanel header="Names & Sites">
+            <div v-for="trk in tracks" :key="trk.id" >
+              <div v-for="ln in trk.hierarchicalNames" :key="ln.countryCode">
+                <span v-if="ln.cityName">{{ln.cityName}},</span> <span v-if="ln.stateName">{{ln.stateName}},</span> {{ln.countryName}}
+                <div v-for="site in ln.sites" :key="site.id">
+                  <Site @zoomToSite="zoomToSite" :site="site"></Site>
+                </div>
+              </div>
+            </div>
+          </TabPanel>
+        </TabView>
       </div>
     </div>
   </div>
@@ -52,8 +66,12 @@
 import { Options, Vue } from 'vue-class-component'
 import { Prop, Watch } from 'vue-property-decorator'
 import Button from 'primevue/button'
+import TabPanel from 'primevue/tabpanel'
+import TabView from 'primevue/tabview'
 
-import { SearchTrack } from "@/models/SearchResults"
+import Site from '@/components/Site.vue'
+import { Geo } from '@/utils/Geo'
+import { SearchLocationNamesSite, SearchTrack } from "@/models/SearchResults"
 import { Displayable } from '@/utils/Displayable'
 import { emptyGpxBounds, Gpx, GpxBounds, GpxParser, GpxSegment, GpxWaypoint } from '@/models/Gpx'
 import { MapSelectedType, MapSelection, noMapSelection } from '@/models/MapSelection'
@@ -71,7 +89,10 @@ interface WaypointTracking {
 
 @Options({
   components: {
-    Button
+    Button,
+    Site,
+    TabPanel,
+    TabView,
   }
 })
 export default class Info extends Vue {
@@ -86,9 +107,20 @@ export default class Info extends Vue {
   trackWaypointIndex = new Map<string, number>()
   selectedTrackIndex = -1
   selectedItemIndex = -1
+  siteZoomOffset = 75.0
 
   mounted(): void {
     this.processLists()
+  }
+
+  zoomToSite(site: SearchLocationNamesSite): void {
+    const bounds = {
+      minLat: Geo.metersOffset(site.lat, -this.siteZoomOffset),
+      minLon: Geo.metersOffset(site.lon, -this.siteZoomOffset),
+      maxLat: Geo.metersOffset(site.lat, this.siteZoomOffset),
+      maxLon: Geo.metersOffset(site.lon, this.siteZoomOffset),
+    } as GpxBounds
+    this.$emit('sizeToBounds', bounds)
   }
 
   zoomToItem(item: (SegmentTracking | WaypointTracking)): void {
@@ -96,7 +128,12 @@ export default class Info extends Vue {
     if (this.isSegment(item)) {
       bounds = GpxParser.segmentBounds(item.segment)
     } else if (this.isWaypoint(item)) {
-      bounds = GpxParser.waypointBounds(item.waypoint)
+      bounds = {
+        minLat: Geo.metersOffset(item.waypoint.latitude, -this.siteZoomOffset),
+        minLon: Geo.metersOffset(item.waypoint.longitude, -this.siteZoomOffset),
+        maxLat: Geo.metersOffset(item.waypoint.latitude, this.siteZoomOffset),
+        maxLon: Geo.metersOffset(item.waypoint.longitude, this.siteZoomOffset)
+      } as GpxBounds
     }
 
     if (bounds !== emptyGpxBounds) {
@@ -288,6 +325,7 @@ export default class Info extends Vue {
 
 .info-header {
   height: auto;
+  margin-bottom: 0.2em;
 }
 
 .track-details {

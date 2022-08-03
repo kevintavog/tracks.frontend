@@ -6,6 +6,14 @@ export class Geo {
     return 6372.8 * 1000
   }
 
+  static get metersPerDegree(): number {
+    return 111111.0
+  }
+
+  public static metersOffset(latOrLon: number, meters: number): number {
+    return +latOrLon + (+meters / +this.metersPerDegree)
+  }
+
   public static normalizeDegrees(degrees: number): number {
     if (degrees >= 0 && degrees <= 360) {
       return degrees
